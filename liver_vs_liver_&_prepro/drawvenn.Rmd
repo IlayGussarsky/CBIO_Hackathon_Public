@@ -1,0 +1,98 @@
+---
+title: "drawvenn"
+output: html_document
+---
+
+```{r}
+setwd("/Users/hilleldravish/Library/CloudStorage/GoogleDrive-darvish.hillel@mail.huji.ac.il/My Drive/CBIO-HACK/HackCode/liver_vs_liver_&_prepro/")
+library(tidyverse)
+gmm_list <- read.csv("../feature_selection/gene_orders/gene_order_gmm.csv", header = FALSE)
+tt_list <- read.csv("../feature_selection/gene_orders/gene_order_ttest.csv", header = FALSE)
+ks_list <- read.csv("../feature_selection/gene_orders/gene_order_kstest.csv", header = FALSE)
+
+gmm_list  <- gmm_list%>%mutate(Gene=V1)%>%select(!V1)
+tt_list  <- tt_list%>%mutate(Gene=V1)%>%select(!V1)
+ks_list  <- ks_list%>%mutate(Gene=V1)%>%select(!V1)
+
+gmm_list  <- gmm_list%>%mutate(NAME="GMM")
+tt_list  <- tt_list%>%mutate(NAME="t-test")
+ks_list  <- ks_list%>%mutate(NAME="ks-test")
+
+
+# first_list  <- unlist(first_list$Gene)
+# second_list  <- unlist(second_list$Gene)
+```
+
+```{r}
+library(tidyverse)
+library(VennDiagram)
+ 
+data  <- bind_rows(gmm_list, tt_list, ks_list)
+
+#Make the plot
+venn.diagram(
+  x = list(
+    data %>% filter(NAME=="GMM") %>% select(Gene) %>% slice(1:100) %>% unlist() , 
+    data %>% filter(NAME=="t-test") %>% select(Gene) %>% slice(1:100) %>% unlist() , 
+    data %>% filter(NAME=="ks-test") %>% select(Gene) %>% slice(1:100) %>% unlist()
+    ),
+  category.names = c("GMM" , "t-test" , "ks-test"),
+  filename = 'venn.png',
+  output = TRUE ,
+          imagetype="png" ,
+          col=c("#440154ff", '#21908dff', '#fde725ff'),
+          fill = c(alpha("#440154ff",0.3), alpha('#21908dff',0.3), alpha('#fde725ff',0.3)),
+          cex = 0.5,
+          fontfamily = "sans",
+          cat.cex = 0.3,
+          cat.default.pos = "outer",
+          cat.pos = c(-27, 27, 135),
+          cat.dist = c(0.055, 0.055, 0.085),
+          cat.fontfamily = "sans",
+          cat.col = c("#440154ff", '#21908dff', '#fde725ff'),
+          rotation = 1
+        )
+
+```
+
+```{r}
+if (!require(devtools)) install.packages("devtools")
+devtools::install_github("yanlinlin82/ggvenn")
+library(ggvenn)
+
+
+  x = list(
+    GMM = data %>% filter(NAME=="GMM") %>% select(Gene) %>% slice(1:100) %>% unlist() , 
+    `T-TEST` = data %>% filter(NAME=="t-test") %>% select(Gene) %>% slice(1:100) %>% unlist() ,
+    `KS-TEST` = data %>% filter(NAME=="ks-test") %>% select(Gene) %>% slice(1:100) %>% unlist()
+    )
+pl <- ggvenn(
+  x, 
+  fill_color = c("#0073C2FF", "#EFC000FF", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+
+print(pl)
+```
+```{r}
+library(ggVennDiagram)
+library(viridis)  # Load viridis for the color scale
+
+x = list(
+  GMM = data %>% filter(NAME=="GMM") %>% select(Gene) %>% slice(1:100) %>% unlist(),
+  `T-TEST` = data %>% filter(NAME=="t-test") %>% select(Gene) %>% slice(1:100) %>% unlist(),
+  `KS-TEST` = data %>% filter(NAME=="ks-test") %>% select(Gene) %>% slice(1:100) %>% unlist()
+)
+
+vendig <- ggVennDiagram(x, label_alpha = 0.8,) +
+  scale_fill_gradient(high = "#FDE725", low = "#440154")
+
+print(vendig)
+ggsave(plot = vendig, "venn_updated.png")
+```
+
+
+
+
+
+

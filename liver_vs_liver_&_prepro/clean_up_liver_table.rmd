@@ -1,0 +1,413 @@
+---
+title: "clean up liver table"
+output: html_document
+---
+```{r}
+library("googledrive")
+library("googledrive")
+library("tidyverse")
+googledrive::drive_auth()
+```
+
+```{r}
+df <- read.csv("/Users/hilleldravish/Library/CloudStorage/GoogleDrive-darvish.hillel@mail.huji.ac.il/My Drive/CBIO-HACK/Data/ClinicalData/filtered_clinical_data.csv", sep=",")
+head(df)
+```
+
+
+```{r}
+library(ggplot2)
+library(plotly)
+df$Biopsy_Diagnosis %>% unique()
+
+# Convert the column to a factor (important for categorical data)
+df$Biopsy_Diagnosis <- as.factor(df$Biopsy_Diagnosis)
+
+# Using geom_bar() for counts
+plotl <- ggplot(df, aes(x = Biopsy_Diagnosis)) +
+  geom_bar() +
+  labs(title = "Distribution of Biopsy Diagnoses",
+       x = "Diagnosis",
+       y = "Count") +
+  theme_bw() # Optional: Use a clean theme
+
+ggplotly(plotl)
+
+df$Biopsy_Diagnosis <-  ifelse(df$Biopsy_Diagnosis == "PBC + Schistosomiasis" , "PBC", df$Biopsy_Diagnosis)
+df$Biopsy_Diagnosis <-  ifelse(df$Biopsy_Diagnosis == "PBC?" , "PBC", df$Biopsy_Diagnosis)
+df$Biopsy_Diagnosis <-  ifelse(df$Biopsy_Diagnosis == "Mild PBC?" , "PBC", df$Biopsy_Diagnosis)
+
+#Even more concise
+diagnostic <- df %>%
+  group_by(Biopsy_Diagnosis) %>%
+  summarise(n = n()) %>%
+  filter(n >= 5)
+
+list_diagnostic <- diagnostic$Biopsy_Diagnosis
+#list_diagnostic
+
+
+
+only_suff_df <- df %>% filter(Biopsy_Diagnosis %in% list_diagnostic) %>% filter(!(Biopsy_Diagnosis %in% c("Normal", "No Diagnosis", "DILI")))
+only_suff_df
+```
+
+```{r}
+# Filtering the dataframe
+# only_suff_df <- df %>% filter(Biopsy_Diagnosis %in% list_diagnostic)
+
+# Reading the gene matrix file
+gene_matrix <- read_csv("/Users/hilleldravish/Library/CloudStorage/GoogleDrive-darvish.hillel@mail.huji.ac.il/My Drive/CBIO-HACK/Data/GeneMatrix/GeneMatrix-LLB.csv")
+head(gene_matrix)
+
+# Getting column names, excluding 'GeneName'
+colnames_genes <- colnames(gene_matrix %>% select(-GeneName))
+head(colnames_genes)
+
+# Adjusting column names by removing unwanted parts
+colnames_genes <- lapply(colnames_genes, function(x) {
+  parts <- strsplit(x, "[.]")[[1]]
+  parts[1]  # First part before the dot
+})
+colnames_genes <- lapply(colnames_genes, function(x) {
+  parts <- strsplit(x, "LLB")[[1]]
+  parts[2]  # Second part after 'LLB'
+})
+colnames_genes <- unlist(colnames_genes)
+
+# Displaying new column names
+print(c("GeneName", colnames_genes))
+
+# Setting the new column names
+colnames(gene_matrix) <- c("GeneName", colnames_genes)
+
+# Checking the modified gene matrix
+head(gene_matrix)
+
+```
+
+
+```{r}
+# Ensure LLB_num is padded to 4 digits
+only_suff_df_padded <- only_suff_df %>%
+  mutate(LLB_num = str_pad(LLB_num, width = 4, side = "left", pad = "0"))
+
+# Display the first few rows of the updated data
+head(only_suff_df_padded)
+
+# Make a copy of the gene matrix and rename its columns
+gene_matrix_renamed <- gene_matrix
+
+# Get the valid LLB_num values that exist in the column names of gene_matrix_renamed
+valid_llb_nums <- only_suff_df_padded$LLB_num[only_suff_df_padded$LLB_num %in% colnames(gene_matrix_renamed)]
+valid_llb_nums <- c("GeneName", valid_llb_nums)
+
+# Select only the columns that correspond to the valid LLB_num values
+gene_matrix_no_gene <- gene_matrix_renamed %>%
+  select(valid_llb_nums)
+
+# Display the first few rows of the result
+head(gene_matrix_no_gene)
+colnamess <- gene_matrix_no_gene$GeneName
+llb_diag <- as.character(unlist((colnames(gene_matrix_no_gene)[-1])))
+
+gene_matrix_no_gene_transposed <- as.data.frame(t(gene_matrix_no_gene[-1]))
+colnames(gene_matrix_no_gene_transposed) <- colnamess
+gene_matrix_no_gene_transposed$Diagnosis <- llb_diag
+
+llb_to_diagnosis <- setNames(only_suff_df_padded$Biopsy_Diagnosis, only_suff_df_padded$LLB_num)
+gene_matrix_no_gene_transposed$Diagnosis <- llb_to_diagnosis[gene_matrix_no_gene_transposed$Diagnosis]
+write.csv(x = gene_matrix_no_gene_transposed, file = "/Users/hilleldravish/Library/CloudStorage/GoogleDrive-darvish.hillel@mail.huji.ac.il/My Drive/CBIO-HACK/Data/CleanUp/cleaned_llb_matrix.csv", row.names = FALSE)
+```
+
+
+```{r}
+pltl <- ggplot(gene_matrix_no_gene_transposed)
+pltl + geom_boxplot(aes(x=Diagnosis, y=ALB)) + geom_point(aes(x=Diagnosis, y=ALB))
+
+removed_gene_matrix_transpose <- gene_matrix_no_gene_transposed #%>% filter(Diagnosis %in% c("AIH", "MASH", "No Diagnosis"))
+
+plot.ecdf(x=removed_gene_matrix_transpose$GAPDH)
+pltl <- ggplot(removed_gene_matrix_transpose)
+pltl + geom_density(aes(x=GAPDH)) + facet_grid(~Diagnosis)
+```
+Kolmogorov–Smirnov test
+
+```{r}
+library("KSgeneral")
+colnams_no_diag <- colnames(gene_matrix_no_gene_transposed %>% select(!Diagnosis))
+res_anov <- list()
+
+for (gene in colnams_no_diag) {
+  formula <- as.formula(paste(gene, "~ Diagnosis"))
+  
+  result <- tryCatch({
+    aov(formula, data = gene_matrix_no_gene_transposed)
+  }, error = function(e) {
+    message(paste("Error in ANOVA for gene", gene, ":", e$message)) # Print error message
+    NULL # Return NULL if there's an error
+  })
+  
+  res_anov[[gene]] <- result # Store the result (or NULL if there was an error)
+}
+
+# histogram
+hist(res_anov[["ALB"]]$residuals)
+
+```
+
+
+# ```{r}
+# # List of gene names (excluding 'Diagnosis' column)
+# colnams_no_diag <- colnames(gene_matrix_no_gene_transposed %>% select(-Diagnosis))
+# 
+# # List to store results
+# res_ks <- list()
+# 
+# # Perform Kolmogorov-Smirnov test for each gene
+# for (gene in colnams_no_diag) {
+#   
+#   # Get the expression values for the current gene
+#   gene_data <- gene_matrix_no_gene_transposed[[gene]]
+#   
+#   # Extract the unique diagnosis levels (groups)
+#   diagnosis_levels <- unique(gene_matrix_no_gene_transposed$Diagnosis)
+#   
+#   # List to store pairwise KS results for the current gene
+#   pairwise_results <- list()
+#   
+#   # Perform KS test for each pair of diagnosis levels
+#   for (i in 1:(length(diagnosis_levels) - 1)) {
+#     for (j in (i + 1):length(diagnosis_levels)) {
+#       
+#       group1 <- diagnosis_levels[i]
+#       group2 <- diagnosis_levels[j]
+#       
+#       # Get the gene expression values for each group
+#       group1_data <- gene_data[gene_matrix_no_gene_transposed$Diagnosis == group1]
+#       group2_data <- gene_data[gene_matrix_no_gene_transposed$Diagnosis == group2]
+#       
+#       # Perform Kolmogorov-Smirnov test
+#       ks_test_result <- tryCatch({
+#         ks.test(group1_data, group2_data)
+#       }, error = function(e) {
+#         message(paste("Error in KS test for gene", gene, ":", e$message))
+#         NULL
+#       })
+#       
+#       # Store the result if the test was successful
+#       if (!is.null(ks_test_result)) {
+#         pairwise_results[[paste(group1, "vs", group2)]] <- ks_test_result$p.value
+#       }
+#     }
+#   }
+#   
+#   # If pairwise results are available, adjust for multiple comparisons using Benjamini-Hochberg (BH) method
+#   if (length(pairwise_results) > 0) {
+#     p_values <- unlist(pairwise_results)
+#     adjusted_p_values <- p.adjust(p_values, method = "BH")
+#     
+#     # Store the adjusted p-values along with their respective comparisons
+#     res_ks[[gene]] <- data.frame(Comparison = names(pairwise_results), 
+#                                  P_value = p_values, 
+#                                  Adjusted_P_value = adjusted_p_values)
+#   }
+# }
+# 
+# ```
+# 
+# ```{r}
+# # Create an empty data frame to store the results for all genes and pairwise comparisons
+# all_results <- data.frame(Gene = character(),
+#                           Comparison = character(),
+#                           P_value = numeric(),
+#                           Adjusted_P_value = numeric(),
+#                           stringsAsFactors = FALSE)
+# 
+# # Collect results for all genes and pairwise comparisons
+# for (gene in colnams_no_diag) {
+#   
+#   # Get the expression values for the current gene
+#   gene_data <- gene_matrix_no_gene_transposed[[gene]]
+#   
+#   # Extract the unique diagnosis levels (groups)
+#   diagnosis_levels <- unique(gene_matrix_no_gene_transposed$Diagnosis)
+#   
+#   # List to store pairwise KS results for the current gene
+#   pairwise_results <- list()
+#   
+#   # Perform KS test for each pair of diagnosis levels
+#   for (i in 1:(length(diagnosis_levels) - 1)) {
+#     for (j in (i + 1):length(diagnosis_levels)) {
+#       
+#       group1 <- diagnosis_levels[i]
+#       group2 <- diagnosis_levels[j]
+#       
+#       # Get the gene expression values for each group
+#       group1_data <- gene_data[gene_matrix_no_gene_transposed$Diagnosis == group1]
+#       group2_data <- gene_data[gene_matrix_no_gene_transposed$Diagnosis == group2]
+#       
+#       # Perform Kolmogorov-Smirnov test
+#       ks_test_result <- tryCatch({
+#         ks.test(group1_data, group2_data)
+#       }, error = function(e) {
+#         message(paste("Error in KS test for gene", gene, ":", e$message))
+#         NULL
+#       })
+#       
+#       # Store the result if the test was successful
+#       if (!is.null(ks_test_result)) {
+#         pairwise_results[[paste(group1, "vs", group2)]] <- ks_test_result$p.value
+#       }
+#     }
+#   }
+#   
+#   # If pairwise results are available, adjust for multiple comparisons using Benjamini-Hochberg (BH) method
+#   if (length(pairwise_results) > 0) {
+#     p_values <- unlist(pairwise_results)
+#     adjusted_p_values <- p.adjust(p_values, method = "BH")
+#     
+#     # Store the results in the all_results data frame
+#     temp_results <- data.frame(Gene = rep(gene, length(pairwise_results)),
+#                                Comparison = names(pairwise_results),
+#                                P_value = p_values,
+#                                Adjusted_P_value = adjusted_p_values,
+#                                stringsAsFactors = FALSE)
+#     
+#     all_results <- rbind(all_results, temp_results)
+#   }
+# }
+# 
+# # Sort by adjusted p-value in descending order
+# sorted_results <- all_results[order(-all_results$Adjusted_P_value), ]
+# 
+# # Select the top 100 genes with the highest adjusted p-values
+# top_100_results <- sorted_results[1:100, ]
+# 
+# # View the top 100 results
+# head(top_100_results)
+# 
+# ```
+
+
+```{r}
+# Load the necessary library
+library(dplyr)
+
+# Read the CSV file
+ks_df_full <- read.csv("ks_all_vs_rest_results-filtered.csv")
+
+# Sort by p-value in ascending order
+ks_df_full_sorted <- ks_df_full %>% arrange(P_value)
+
+# Select the top 100 rows (lowest p-values)
+top_100 <- head(ks_df_full_sorted, 100)
+
+print(top_100)
+
+# Handle cases where the DataFrame has fewer than 100 rows
+n <- min(100, nrow(ks_df_full_sorted)) # Get the smaller value between 100 and the number of rows
+top_n <- head(ks_df_full_sorted, n) # Get the top n rows
+
+cat("\nTop n (handling cases with fewer than 100 rows):\n")
+print(top_n)
+```
+
+```{r}
+plot_data <- removed_gene_matrix_transpose %>% select(ZNF75D, Diagnosis) %>% 
+  mutate(Diagnosis = ifelse(Diagnosis != "No Diagnosis", "cool", Diagnosis))
+
+plotl <-  ggplot(plot_data)
+plotl + geom_boxplot(aes(x=Diagnosis, y=ZNF75D))
+
+
+plot_data <- removed_gene_matrix_transpose %>% select(SLC37A1, Diagnosis) %>% 
+  mutate(Diagnosis = ifelse(Diagnosis != "MASH", "cool", Diagnosis))
+
+plotl <-  ggplot(plot_data)
+plotl + geom_density(aes(x=SLC37A1, color=Diagnosis))
+
+
+plot_data <- removed_gene_matrix_transpose %>% select(S100A2, Diagnosis) %>% 
+  mutate(Diagnosis = ifelse(Diagnosis != "AIH", "cool", Diagnosis))
+
+plotl <-  ggplot(plot_data)
+plotl +  geom_boxplot(aes(x=Diagnosis, y=S100A2))
+
+
+plot_data <- removed_gene_matrix_transpose %>% select(SNTB2, Diagnosis) %>% 
+  mutate(Diagnosis = ifelse(Diagnosis != "No Diagnosis", "cool", Diagnosis))
+
+plotl <-  ggplot(plot_data)
+plotl +  geom_boxplot(aes(x=Diagnosis, y=SNTB2))
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Read and sort the data matrix by p-value
+ks_df_full <- read.csv("ks_all_vs_rest_results-filtered.csv")
+ks_df_full_sorted <- ks_df_full %>% arrange(P_value)
+
+# Select the top 100 rows (lowest p-values)
+top_n <- head(ks_df_full_sorted, min(100, nrow(ks_df_full_sorted)))
+
+# Load the main data matrix
+# Assuming `removed_gene_matrix_transpose` contains the gene expression data
+# and a "Diagnosis" column exists.
+removed_gene_matrix_transpose <- read.csv("/Users/hilleldravish/Library/CloudStorage/GoogleDrive-darvish.hillel@mail.huji.ac.il/My Drive/CBIO-HACK/Data/CleanUp/cleaned_llb_matrix.csv")
+
+# Function to generate and save plots
+generate_graphs <- function(data, gene_name, comparison) {
+  plot_data <- data %>%
+    select(!!sym(gene_name), Diagnosis) %>%
+    mutate(Diagnosis = ifelse(Diagnosis != comparison, "Rest", Diagnosis))
+  
+    plot <- ggplot(plot_data) +
+      geom_density(aes(x = !!sym(gene_name), color = Diagnosis)) +
+      labs(title = paste("Density Plot for", gene_name),
+           x = gene_name, y = "Density")
+    
+    plot2 <- ggplot(plot_data) +
+      geom_boxplot(aes(x = Diagnosis, y = !!sym(gene_name))) +
+      labs(title = paste("Boxplot for", gene_name),
+           x = "Diagnosis", y = gene_name)
+    
+    comb_plot <- plot/plot2
+  
+  # Save plot
+  ggsave(filename = paste0("plots2/plot_", gene_name, "_", comparison, ".png"), plot = comb_plot, width = 8, height = 6)
+}
+
+# Iterate through the top genes and generate plots
+for (i in 1:nrow(top_n)) {
+  gene <- top_n$Gene[i]
+  comparison <- strsplit(top_n$Comparison[i], " vs ")[[1]][1] # Extract the comparison group
+  generate_graphs(removed_gene_matrix_transpose, gene, comparison)
+}
+
+cat("Plots have been generated and saved.")
+
+```
+
+```{r}
+ks_df_full <- read.csv("ks_all_vs_rest_results-filtered2.csv")
+ks_df_full_mash <- ks_df_full %>% filter(Comparison=="MASH vs Rest") %>% arrange(P_value) %>% slice(1:100)
+mashls <- ks_df_full_mash$Gene
+
+cat(mashls, sep = "\n")
+```
+
+
+
+
+
+
+
+
+
+

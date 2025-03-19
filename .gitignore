@@ -1,0 +1,9 @@
+.idea/
+.venv/
+.Rproj.user
+venv/
+Data/
+__pycache__/
+./config.py
+liver_vs_liver_&_prepro/plots*
+
