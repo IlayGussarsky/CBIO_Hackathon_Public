@@ -29,14 +29,16 @@ class MeanClassifier:
             self.means.append((healthy_mean, sick_mean))
 
     def predict_single_sample(self, single_sample):
-        ret = []
+        votes = []
         for i, g in enumerate(self.genes):
             index = np.where(globals.feature_names == g)[0][0]
             if self.means[i][0] > self.means[i][1]:
-                ret.append(1 if single_sample[index] < self.lines[i] else 0)
+                votes.append(1 if single_sample[index] < self.lines[i] else 0)
             else:
-                ret.append(0 if single_sample[index] < self.lines[i] else 1)
-        return sum(ret) / len(self.genes)
+                votes.append(0 if single_sample[index] < self.lines[i] else 1)
+
+        # Majority vote decision
+        return 1 if sum(votes) > len(self.genes) / 2 else 0
 
     def predict(self, data) -> np.ndarray:
         return np.asarray([self.predict_single_sample(row) for row in tqdm.tqdm(data)])
